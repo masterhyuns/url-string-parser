@@ -1,0 +1,83 @@
+@startuml URL Parser Architecture Overview
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontSize 10
+
+title URL & QueryString Parser - Architecture Overview
+
+package "Entry Points" as entry #E8F4FD {
+  [useParseState Hook] as hook
+  [parseUrlComponents] as urlComp
+}
+
+package "Parsers" as parsers #F0F8E8 {
+  [parseUrlSegments] as urlParser
+  [parseQueryString] as queryParser
+  [smartSplitQuery] as smartSplit
+}
+
+package "Core Utils" as utils #FFF8E8 {
+  [detectProcessingMode] as detectMode
+  [processSubstitution] as substitution
+  [extractValueWithBrackets] as extract
+  [parseFlags] as flags
+  [detectParameterType] as paramType
+}
+
+package "Transform Services" as transform #F8E8F8 {
+  [transformSegments] as transSegments
+  [transformQueries] as transQueries
+  [transformParameter] as transParam
+  [processGlobalQuery] as globalQuery
+}
+
+package "External APIs" as apis #FFE8E8 {
+  [TypeConverter] as typeAPI
+  [Encryptor] as encryptAPI
+}
+
+' Entry flow
+hook --> urlComp : "1. Parse URL"
+hook --> urlParser : "2. Parse Segments"
+hook --> queryParser : "3. Parse Queries"
+hook --> transSegments : "4. Transform Segments"
+hook --> transQueries : "5. Transform Queries"
+
+' URL parsing flow
+urlComp --> urlParser : "path extraction"
+urlParser --> detectMode : "mode detection"
+urlParser --> extract : "bracket extraction"
+
+' Query parsing flow
+queryParser --> smartSplit : "safe splitting"
+queryParser --> detectMode : "mode detection"
+queryParser --> extract : "bracket extraction"
+queryParser --> flags : "flag parsing"
+
+' Processing mode branches
+detectMode --> substitution : "SUBSTITUTION mode"
+detectMode --> transParam : "PARAMETER mode"
+
+' Transform flow
+transSegments --> substitution : "complex segments"
+transSegments --> transParam : "simple segments"
+transQueries --> globalQuery : "global queries"
+transQueries --> substitution : "substitution queries"
+transQueries --> transParam : "parameter queries"
+
+' Utils dependencies
+extract --> flags
+substitution --> paramType
+substitution --> typeAPI
+substitution --> encryptAPI
+transParam --> typeAPI
+transParam --> encryptAPI
+globalQuery --> transParam
+
+note top of detectMode : **핵심 분기점**\n파라미터 vs 치환 모드
+
+note right of substitution : **스택 기반 파싱**\n중첩 중괄호 처리
+
+note bottom of globalQuery : **2단계 처리**\n내부 변환 → 전체 암호화
+
+@enduml

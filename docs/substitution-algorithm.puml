@@ -1,0 +1,88 @@
+@startuml Substitution Algorithm - Stack Based Parsing
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title processSubstitution - 스택 기반 중괄호 파싱
+
+start
+
+:입력 문자열;
+note right: "PROC=!@r{NAME}AND{VALUE}"
+
+:변화 플래그 = true;
+:처리된 문자열 = 입력;
+
+while (변화가 있는가?) is (YES)
+  :변화 플래그 = false;
+  :스택 초기화;
+  :i = 0부터 문자열 순회;
+  
+  while (i < 문자열 길이?) is (YES)
+    :현재 문자 = 문자열[i];
+    
+    if (현재 문자 == '{') then (YES)
+      if (스택이 비어있음?) then (YES)
+        :플래그 시작점 찾기;
+        note right
+          역순으로 e,r,v 문자 추적
+          PROC=!@r{ → r이 플래그
+        end note
+      endif
+      :스택에 push {인덱스, 플래그시작};
+    elseif (현재 문자 == '}' && 스택 비어있지 않음?) then (YES)
+      :스택에서 pop;
+      
+      if (스택이 비워졌나?) then (YES)
+        :완성된 중괄호 쌍 발견;
+        
+        :전체 매칭 부분 추출;
+        note right: "r{NAME}"
+        
+        :플래그 문자열 추출;
+        note right: "r"
+        
+        :중괄호 안 값 추출;
+        note right: "NAME"
+        
+        :플래그 파싱;
+        note right: {required: true}
+        
+        :타입 결정;
+        note right: ParameterType.A
+        
+        if (리터럴이 아니고 변환 함수 존재?) then (YES)
+          :타입 변환 API 호출;
+          note right: NAME → NAME_VALUE
+        endif
+        
+        if (암호화 플래그 존재?) then (YES)
+          :암호화 API 호출;
+        endif
+        
+        :최종값 결정;
+        note right
+          우선순위:
+          1. 암호화된 값
+          2. 변환된 값  
+          3. 리터럴 값
+          4. 빈 값
+        end note
+        
+        :문자열에서 치환;
+        note right: "PROC=!@r{NAME}" → "PROC=!@NAME_VALUE"
+        
+        :변화 플래그 = true;
+        :break (다시 시작);
+      endif
+    endif
+    
+    :i++;
+  endwhile (NO)
+endwhile (NO)
+
+:최종 처리된 문자열 반환;
+note right: "PROC=!@NAME_VALUE"
+
+stop
+
+@enduml

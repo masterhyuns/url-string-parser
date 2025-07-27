@@ -1,0 +1,58 @@
+@startuml Mode Detection Logic
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title detectProcessingMode - 핵심 분기 로직
+
+start
+
+:입력 값 받기;
+note right: 예: "e{A_TYPE_1}", "PROC=!@r{NAME}", "v{TEXT}.com"
+
+:정규식 검사: /^[erv]*\{[^{}]+\}$/;
+note right
+  - ^[erv]*: 시작부터 플래그 문자들
+  - \{[^{}]+\}: 중괄호 안에 중괄호가 아닌 문자들
+  - $: 문자열 끝
+end note
+
+if (정규식 매치?) then (YES)
+  :중괄호 안 내용 추출;
+  :내부에 중괄호 패턴 확인: /\{.*\}/;
+  
+  if (내부에 중괄호 존재?) then (NO)
+    :PARAMETER 모드;
+    note right
+      **파라미터 모드 예시:**
+      - e{A_TYPE_1}
+      - v{LITERAL}  
+      - rev{B_TYPE_2}
+      
+      **특징:**
+      - 중괄호가 바로 시작
+      - 안에 다른 중괄호 없음
+      - 값을 추출해서 API 변환
+    end note
+    stop
+  else (YES)
+    :SUBSTITUTION 모드;
+  endif
+else (NO)
+  :SUBSTITUTION 모드;
+endif
+
+note right
+  **치환 모드 예시:**
+  - PROC=!@r{NAME}
+  - v{TEXT}.com
+  - prefix_{VALUE}_suffix
+  
+  **특징:**
+  - 중괄호와 다른 문자 혼재
+  - 문자열 내부 중괄호 치환
+  - 스택 기반 파싱 필요
+end note
+
+stop
+
+@enduml

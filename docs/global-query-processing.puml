@@ -1,0 +1,81 @@
+@startuml Global Query Processing
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title 전역 쿼리 처리 - 2단계 변환 과정
+
+participant "Input" as input
+participant "parseQueryString" as parser
+participant "parseNestedStructure" as nested
+participant "parseQueryValue" as queryValue
+participant "processGlobalQuery" as global
+participant "transformParameter" as transform
+participant "TypeConverter API" as typeAPI
+participant "Encryptor API" as encryptAPI
+
+input -> parser: ?e{name={A_TYPE_1}&value=test}
+activate parser
+
+parser -> nested: 전역 플래그 확인
+activate nested
+nested --> parser: globalFlags: {encrypted: true}\ncontent: "name={A_TYPE_1}&value=test"
+deactivate nested
+
+parser -> queryValue: 내부 쿼리 파싱
+activate queryValue
+queryValue --> parser: innerResults: [\n  {key: "name", value: "{A_TYPE_1}", ...},\n  {key: "value", value: "test", ...}\n]
+deactivate queryValue
+
+parser --> parser: 전역 쿼리 객체 생성
+note right
+  {
+    key: "__GLOBAL__",
+    type: "GLOBAL",
+    flags: {encrypted: true},
+    innerResults: [내부 쿼리들]
+  }
+end note
+
+parser --> input: [globalQueryObject]
+deactivate parser
+
+== Transform 단계 ==
+
+input -> global: processGlobalQuery 호출
+activate global
+
+loop 각 내부 쿼리에 대해
+  global -> transform: transformParameter
+  activate transform
+  
+  alt name={A_TYPE_1}인 경우
+    transform -> typeAPI: A_TYPE_1 변환
+    typeAPI --> transform: A_TYPE_1_VALUE
+  else value=test인 경우
+    transform --> transform: 리터럴 값 그대로
+  end
+  
+  transform --> global: 변환된 쿼리
+  deactivate transform
+end
+
+global --> global: 재구성: "name=A_TYPE_1_VALUE&value=test"
+
+global -> encryptAPI: 전체 문자열 암호화
+activate encryptAPI
+encryptAPI --> global: ENC[name=A_TYPE_1_VALUE&value=test]
+deactivate encryptAPI
+
+global --> input: 최종 전역 쿼리 객체
+deactivate global
+
+note over input
+  **최종 결과:**
+  finalValue: "ENC[name=A_TYPE_1_VALUE&value=test]"
+  
+  **URL 재구성:**
+  기존: ?e{name={A_TYPE_1}&value=test}
+  결과: ?ENC[name=A_TYPE_1_VALUE&value=test]
+end note
+
+@enduml

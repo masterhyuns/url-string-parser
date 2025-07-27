@@ -1,0 +1,80 @@
+@startuml Processing Flow Diagram
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title URL Parser - Processing Flow & Mode Detection
+
+start
+
+:입력 URL 수신;
+note right: http://localhost/v{TEXT}.com?where=e{PROC=!@r{NAME}}
+
+:URL 컴포넌트 분리;
+note right
+  - protocol: http
+  - host: localhost
+  - path: /v{TEXT}.com
+  - query: where=e{PROC=!@r{NAME}}
+end note
+
+fork
+  :URL 세그먼트 파싱;
+  :각 세그먼트별 모드 감지;
+  
+  if (detectProcessingMode?) then (PARAMETER)
+    :extractValueWithBrackets;
+    note right: e{A_TYPE_1} → 플래그='e', 값='A_TYPE_1'
+    :타입 변환 + 암호화;
+  else (SUBSTITUTION)
+    :processSubstitution;
+    note right: v{TEXT}.com → TEXT.com
+    :스택 기반 중괄호 파싱;
+  endif
+  
+  :transformSegments;
+
+fork again
+  :쿼리스트링 파싱;
+  :전역 플래그 확인;
+  
+  if (전역 플래그 존재?) then (YES)
+    :parseNestedStructure;
+    :내부 쿼리들 파싱;
+    :processGlobalQuery;
+    note right
+      1. 내부 쿼리 변환
+      2. 재구성
+      3. 전체 암호화
+    end note
+  else (NO)
+    :smartSplitQuery;
+    note right: 중괄호 고려한 안전한 분할
+    
+    :각 쿼리별 모드 감지;
+    
+    if (detectProcessingMode?) then (PARAMETER)
+      :extractValueWithBrackets;
+      :transformParameter;
+    else (SUBSTITUTION)
+      :processSubstitution;
+      note right
+        PROC=!@r{NAME}
+        → PROC=!@NAME_VALUE
+      end note
+    endif
+  endif
+  
+  :transformQueries;
+
+end fork
+
+:최종 URL 재구성;
+note right
+  - baseUrl + reconstructedPath
+  - + queryString
+  - 결과: http://localhost/TEXT.com?where=ENC[PROC=!@NAME_VALUE]
+end note
+
+stop
+
+@enduml

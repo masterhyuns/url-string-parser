@@ -1,0 +1,100 @@
+@startuml Test Cases & Examples
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title URL Parser - 주요 테스트 케이스
+
+class "파라미터 모드 예시" as param {
+  **입력:** e{A_TYPE_1}
+  --
+  **감지:** PARAMETER
+  **플래그:** {encrypted: true}
+  **추출값:** A_TYPE_1
+  **변환:** A_TYPE_1_VALUE
+  **암호화:** ENC[A_TYPE_1_VALUE]
+  **최종:** ENC[A_TYPE_1_VALUE]
+}
+
+class "치환 모드 예시" as subst {
+  **입력:** PROC=!@r{NAME}
+  --
+  **감지:** SUBSTITUTION
+  **스택파싱:** r{NAME} 발견
+  **플래그:** {required: true}
+  **추출값:** NAME
+  **변환:** NAME_VALUE
+  **치환:** PROC=!@NAME_VALUE
+  **최종:** PROC=!@NAME_VALUE
+}
+
+class "URL 세그먼트 치환" as urlSeg {
+  **입력:** v{TEXT}.com
+  --
+  **감지:** SUBSTITUTION
+  **스택파싱:** v{TEXT} 발견
+  **플래그:** {literal: true}
+  **추출값:** TEXT
+  **변환:** 없음 (리터럴)
+  **치환:** TEXT.com
+  **최종:** TEXT.com
+}
+
+class "전역 쿼리" as global {
+  **입력:** ?e{name={A_TYPE_1}&value=test}
+  --
+  **전역플래그:** {encrypted: true}
+  **내부파싱:** [name={A_TYPE_1}, value=test]
+  **내부변환:** [name=A_TYPE_1_VALUE, value=test]
+  **재구성:** name=A_TYPE_1_VALUE&value=test
+  **전체암호화:** ENC[name=A_TYPE_1_VALUE&value=test]
+  **최종:** ENC[name=A_TYPE_1_VALUE&value=test]
+}
+
+class "복합 플래그" as complex {
+  **입력:** re{A_TYPE_1}
+  --
+  **플래그:** {required: true, encrypted: true}
+  **변환:** A_TYPE_1_VALUE
+  **암호화:** ENC[A_TYPE_1_VALUE]
+  **최종:** ENC[A_TYPE_1_VALUE]
+}
+
+class "중첩 구조" as nested {
+  **입력:** PROC=!@r{NAME}AND{VALUE}
+  --
+  **1차 치환:** r{NAME} → NAME_VALUE
+  **2차 치환:** {VALUE} → VALUE_CONVERTED
+  **최종:** PROC=!@NAME_VALUEANDVALUE_CONVERTED
+}
+
+package "실제 URL 예시" {
+  class "복합 URL" as fullURL {
+    **입력 URL:**
+    http://localhost/v{TEXT}.com?where=e{PROC=!@r{NAME}}&value=v{LITERAL}
+    
+    **처리 과정:**
+    1. URL 분해: protocol, host, path, query
+    2. 세그먼트: v{TEXT}.com → TEXT.com
+    3. 쿼리1: e{PROC=!@r{NAME}} → ENC[PROC=!@NAME_VALUE]  
+    4. 쿼리2: v{LITERAL} → LITERAL
+    
+    **최종 결과:**
+    http://localhost/TEXT.com?where=ENC[PROC=!@NAME_VALUE]&value=LITERAL
+  }
+}
+
+param ..> subst : 모드 차이
+subst ..> urlSeg : 치환 공통점
+global ..> complex : 플래그 조합
+complex ..> nested : 복잡도 증가
+nested ..> fullURL : 실제 적용
+
+note bottom of fullURL
+  **핵심 설계 원칙:**
+  1. 모드 감지가 모든 처리의 분기점
+  2. 스택 기반 파싱으로 중첩 구조 해결
+  3. 명확한 우선순위로 최종값 결정
+  4. 전역 처리는 2단계 변환으로 보안 강화
+end note
+
+@enduml

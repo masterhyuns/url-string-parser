@@ -1,0 +1,176 @@
+@startuml Transformation Tracking System
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title 변환 추적 시스템 - TransformationTrace
+
+class TransformationTrace {
+  + type: ParameterType
+  + target: string
+  + convertedValue: string | null
+  + encryptedValue: string | null
+  + result: string
+  + location: 'url' | 'query'
+  + identifier: string
+  + flags: ParameterFlags
+  + processingMode: ProcessingMode
+  + transformationSuccess: boolean
+  + failureReason?: string
+  --
+  **예시 (성공):**
+  type: ParameterType.A
+  target: "A_TYPE_1"
+  convertedValue: "A_TYPE_1_VALUE"
+  encryptedValue: "ENC[A_TYPE_1_VALUE]"
+  result: "ENC[A_TYPE_1_VALUE]"
+  transformationSuccess: true
+  --
+  **예시 (실패):**
+  type: ParameterType.UNKNOWN
+  target: "UNKNOWN_VALUE"
+  convertedValue: null
+  encryptedValue: null
+  result: "UNKNOWN_VALUE"
+  transformationSuccess: false
+  failureReason: "알 수 없는 타입: A/B 목록에 없음"
+}
+
+package "수집 과정" as collection {
+  
+  class "URL 세그먼트 추적" as urlTrace {
+    **조건:** extractedValue ≠ finalValue
+    **식별자:** segment-${index}
+    **위치:** 'url'
+    --
+    **예시:**
+    v{TEXT}.com → TEXT.com
+    identifier: "segment-0"
+  }
+  
+  class "쿼리 파라미터 추적" as queryTrace {
+    **조건:** extractedValue ≠ finalValue  
+    **식별자:** queryParam.key
+    **위치:** 'query'
+    --
+    **예시:**
+    name={A_TYPE_1} → name=A_TYPE_1_VALUE
+    identifier: "name"
+  }
+  
+  class "전역 쿼리 내부 추적" as globalTrace {
+    **조건:** inner.extractedValue ≠ inner.finalValue
+    **식별자:** ${globalKey}.${innerKey}
+    **위치:** 'query'
+    --
+    **예시:**
+    ?e{name={A_TYPE_1}} 에서 내부 name
+    identifier: "__GLOBAL__.name"
+  }
+}
+
+package "실제 사용 예시" as examples {
+  
+  class "성공 사례 - 완전 변환" as successExample {
+    **입력:** e{A_TYPE_1}
+    **추적 결과:**
+    - type: "A"
+    - target: "A_TYPE_1"
+    - convertedValue: "A_TYPE_1_VALUE"
+    - encryptedValue: "ENC[A_TYPE_1_VALUE]"
+    - result: "ENC[A_TYPE_1_VALUE]"
+    - location: "query"
+    - identifier: "name"
+    - flags: {encrypted: true, required: false, literal: false}
+    - processingMode: "PARAMETER"
+    - transformationSuccess: true
+  }
+  
+  class "성공 사례 - 리터럴" as literalExample {
+    **입력:** v{TEXT}.com  
+    **추적 결과:**
+    - type: "LITERAL"
+    - target: "TEXT"
+    - convertedValue: null
+    - encryptedValue: null
+    - result: "TEXT.com"
+    - location: "url"
+    - identifier: "segment-0"
+    - flags: {encrypted: false, required: false, literal: true}
+    - processingMode: "SUBSTITUTION"
+    - transformationSuccess: true
+  }
+  
+  class "실패 사례 - 알 수 없는 타입" as failureExample {
+    **입력:** {UNKNOWN_VALUE}
+    **추적 결과:**
+    - type: "UNKNOWN"
+    - target: "UNKNOWN_VALUE"
+    - convertedValue: null
+    - encryptedValue: null
+    - result: "UNKNOWN_VALUE"
+    - location: "query"
+    - identifier: "test"
+    - flags: {encrypted: false, required: false, literal: false}
+    - processingMode: "PARAMETER"
+    - transformationSuccess: false
+    - failureReason: "알 수 없는 타입: 'UNKNOWN_VALUE'가 A/B 타입 목록에 없음"
+  }
+  
+  class "실패 사례 - 변환기 없음" as noConverterExample {
+    **입력:** {A_TYPE_1} (TypeConverter 없음)
+    **추적 결과:**
+    - type: "A"
+    - target: "A_TYPE_1"
+    - convertedValue: null
+    - encryptedValue: null
+    - result: "A_TYPE_1"
+    - location: "query"
+    - identifier: "name"
+    - flags: {encrypted: false, required: false, literal: false}
+    - processingMode: "PARAMETER"
+    - transformationSuccess: false
+    - failureReason: "TypeConverter 함수가 제공되지 않음"
+  }
+}
+
+TransformationTrace <|-- urlTrace
+TransformationTrace <|-- queryTrace  
+TransformationTrace <|-- globalTrace
+
+urlTrace ..> literalExample : "생성"
+queryTrace ..> successExample : "생성"
+queryTrace ..> failureExample : "생성"
+globalTrace ..> noConverterExample : "생성"
+
+note bottom of TransformationTrace
+  **활용 목적:**
+  1. **디버깅**: 어떤 값이 어떻게 변환되었는지 단계별 추적
+  2. **로깅**: 변환 과정의 상세 기록 (암호화 전/후 값 포함)
+  3. **검증**: 변환 결과의 정확성 확인
+  4. **분석**: 성능 및 변환 패턴 분석
+  5. **오류 추적**: 실패한 변환의 원인 파악
+end note
+
+note right of collection
+  **수집 조건 (개선됨):**
+  - applyTransform = true 일 때만
+  - extractedValue가 존재하는 모든 중괄호 패턴
+  - 성공/실패 상관없이 모든 변환 시도 기록
+  - 암호화 전 값과 후 값 모두 추적
+end note
+
+note left of examples
+  **추적되는 시나리오:**
+  
+  ✅ **성공 케이스**
+  - 완전 변환 (타입 변환 + 암호화)
+  - 부분 변환 (타입 변환만)
+  - 리터럴 값 (변환 없음)
+  
+  ❌ **실패 케이스**  
+  - 알 수 없는 타입
+  - 변환 함수 미제공
+  - 암호화 함수 미제공
+end note
+
+@enduml

@@ -1,0 +1,93 @@
+@startuml Value Priority System
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title 값 우선순위 체계 - getFinalValue & processSubstitution
+
+start
+
+:파라미터 처리 시작;
+note right
+  입력 예시:
+  - originalValue: "e{A_TYPE_1}"
+  - extractedValue: "A_TYPE_1"
+  - flags: {encrypted: true}
+end note
+
+:타입 변환 시도;
+if (리터럴 플래그?) then (YES - v플래그)
+  :convertedValue = null;
+  note right: v 플래그면 변환 안함
+else (NO)
+  if (A/B 타입 && 변환함수 존재?) then (YES)
+    :TypeConverter API 호출;
+    :convertedValue = "A_TYPE_1_VALUE";
+  else (NO)
+    :convertedValue = null;
+  endif
+endif
+
+:암호화 시도;
+if (암호화 플래그?) then (YES - e플래그)
+  if (암호화할 값 존재?) then (YES)
+    :Encryptor API 호출;
+    if (convertedValue 존재?) then (YES)
+      :encryptedValue = ENC[A_TYPE_1_VALUE];
+    else if (리터럴 && extractedValue 존재?) then (YES)
+      :encryptedValue = ENC[extractedValue];
+    else (NO)
+      :encryptedValue = null;
+    endif
+  else (NO)
+    :encryptedValue = null;
+  endif
+else (NO)
+  :encryptedValue = null;
+endif
+
+:최종값 결정 (우선순위 적용);
+
+if (encryptedValue 존재?) then (YES - 1순위)
+  :finalValue = encryptedValue;
+  note right: ENC[A_TYPE_1_VALUE]
+elseif (convertedValue 존재?) then (YES - 2순위)
+  :finalValue = convertedValue;
+  note right: A_TYPE_1_VALUE
+elseif (리터럴 플래그 && extractedValue 존재?) then (YES - 3순위)
+  :finalValue = extractedValue;
+  note right: 원본 값 그대로
+else (4순위)
+  if (치환 모드?) then (YES)
+    :finalValue = "";
+    note right: 빈 문자열로 치환
+  else (파라미터 모드)
+    :finalValue = originalValue;
+    note right: 원본값 (최후 수단)
+  endif
+endif
+
+:최종값 반환;
+
+stop
+
+floating note right
+  **우선순위 정리:**
+  
+  **1순위: 암호화된 값**
+  - e 플래그가 있고 암호화 성공
+  - 가장 높은 우선순위
+  
+  **2순위: 변환된 값**  
+  - A/B 타입 변환 결과
+  - 비즈니스 로직 적용된 값
+  
+  **3순위: 리터럴 값**
+  - v 플래그가 있는 경우
+  - 원본 값 그대로 사용
+  
+  **4순위: 원본/빈값**
+  - 치환모드: 빈 문자열
+  - 파라미터모드: 원본값
+end note
+
+@enduml

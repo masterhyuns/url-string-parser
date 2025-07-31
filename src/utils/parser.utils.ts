@@ -1,4 +1,4 @@
-import { ParameterType, ParameterFlags, ProcessingMode, ATYPE_VALUES, BTYPE_VALUES } from '../types/parser.types';
+import { ParameterType, ParameterFlags, ProcessingMode, FilteringMode, ATYPE_VALUES, BTYPE_VALUES } from '../types/parser.types';
 
 /**
  * 주어진 값이 어떤 타입에 속하는지 감지합니다.
@@ -601,6 +601,168 @@ export const parseUrlComponents = (urlString: string): {
  * @param onInnerTrace 내부 변환 추적 콜백 (옵션)
  * @returns 치환 완료된 문자열
  */
+/**
+ * 플래그 시작 위치를 찾는 헬퍼 함수
+ * 
+ * @param text 전체 문자열
+ * @param braceIndex 여는 중괄호의 인덱스
+ * @returns 플래그 시작 위치
+ */
+const findFlagStartPosition = (text: string, braceIndex: number): number => {
+  // 역순으로 e,r,v 문자들을 찾아서 플래그 시작점 결정
+  // 예: "PROC=!@r{NAME}" → r{ 부분에서 r이 플래그
+  for (let j = braceIndex - 1; j >= 0; j--) {
+    if (!['e', 'r', 'v'].includes(text[j])) {
+      return j + 1; // 플래그가 아닌 문자 다음부터가 플래그 시작
+    }
+    if (j === 0) return 0; // 처음까지 모두 플래그인 경우
+  }
+  return braceIndex; // 플래그가 없는 경우
+};
+
+/**
+ * 단일 중괄호 패턴을 처리하는 헬퍼 함수
+ * 
+ * @param text 전체 문자열
+ * @param pattern 찾은 중괄호 패턴 (예: "r{NAME}")
+ * @param flagString 플래그 부분 (예: "r")
+ * @param extractedValue 중괄호 안의 값 (예: "NAME")
+ * @param typeConverter 타입 변환 함수
+ * @param encryptor 암호화 함수
+ * @param onInnerTrace 추적 콜백
+ * @returns 변환된 값
+ */
+const processSingleBracketPattern = async (
+  text: string,
+  pattern: string,
+  flagString: string,
+  extractedValue: string,
+  typeConverter?: (value: string, type: ParameterType) => Promise<string>,
+  encryptor?: (value: string) => Promise<string>,
+  onInnerTrace?: (trace: {
+    type: ParameterType;
+    target: string;
+    convertedValue: string | null;
+    encryptedValue: string | null;
+    result: string;
+    flags: ParameterFlags;
+    processingMode: ProcessingMode;
+    transformationSuccess: boolean;
+    failureReason?: string;
+  }) => void,
+  filteringMode: FilteringMode = FilteringMode.DEFAULT
+): Promise<string> => {
+  console.log(`[DEBUG] Found bracket: "${pattern}"`);
+  console.log(`[DEBUG] - flagString: "${flagString}"`);
+  console.log(`[DEBUG] - extractedValue: "${extractedValue}"`);
+  
+  const flags = parseFlags(flagString);
+  console.log(`[DEBUG] - flags:`, flags);
+  
+  const type = detectParameterType(extractedValue);
+  console.log(`[DEBUG] - type: ${type}`);
+  
+  let convertedValue: string | null = null;
+  let encryptedValue: string | null = null;
+  
+  if (filteringMode === FilteringMode.STRICT) {
+    // STRICT 모드: 변환하지 않고, 변환이 필요한 값이 있으면 실패 처리
+    if (flags.literal) {
+      // 리터럴만 허용: v{NAME} → NAME
+      convertedValue = extractedValue;
+    } else if (flags.encrypted || flags.required || type !== ParameterType.UNKNOWN) {
+      // 변환이 필요한 값이 발견됨 - 이 경우 전체 SUBSTITUTION이 실패되어야 함
+      // 빈 문자열로 대체하여 나중에 전체 제외되도록 함
+      convertedValue = '';
+    }
+    // 암호화는 수행하지 않음
+  } else {
+    // DEFAULT 모드: 기존 변환 로직
+    
+    // 타입 변환 수행
+    if (!flags.literal && type !== ParameterType.UNKNOWN && type !== ParameterType.LITERAL && typeConverter) {
+      try {
+        convertedValue = await typeConverter(extractedValue, type);
+        console.log(`[DEBUG] - converted: "${convertedValue}"`);
+      } catch (error) {
+        console.error(`[DEBUG] - conversion failed for "${extractedValue}":`, error);
+      }
+    }
+    
+    // 암호화 수행
+    const valueToEncrypt = convertedValue || (flags.literal ? extractedValue : null);
+    if (flags.encrypted && encryptor && valueToEncrypt) {
+      try {
+        encryptedValue = await encryptor(valueToEncrypt);
+        console.log(`[DEBUG] - encrypted: "${encryptedValue}"`);
+      } catch (error) {
+        console.error(`[DEBUG] - encryption failed for "${valueToEncrypt}":`, error);
+      }
+    }
+  }
+  
+  // 최종 값 결정
+  const finalValue = getFinalValue(
+    pattern,
+    extractedValue,
+    convertedValue,
+    encryptedValue,
+    flags,
+    type,
+    ProcessingMode.SUBSTITUTION
+  );
+  
+  // 추적 정보 기록
+  if (onInnerTrace) {
+    const hasConversion = convertedValue !== null && convertedValue !== extractedValue;
+    const hasEncryption = encryptedValue !== null;
+    // const isChanged = extractedValue !== finalValue; // 현재 사용되지 않음
+    
+    let failureReason: string | undefined;
+    let transformationSuccess = false;
+    
+    if (flags.literal) {
+      // 리터럴 플래그는 항상 성공
+      transformationSuccess = true;
+    } else if (type === ParameterType.UNKNOWN) {
+      // UNKNOWN 타입이면서 변환이 요구되는 경우는 실패
+      failureReason = `알 수 없는 타입: "${extractedValue}"가 A/B 타입 목록에 없음`;
+      transformationSuccess = false;
+    } else if (flags.encrypted && !hasEncryption) {
+      // 암호화 플래그가 있는데 암호화가 안된 경우 실패
+      failureReason = `암호화 실패: "${extractedValue}" 암호화되지 않음`;
+      transformationSuccess = false;
+    } else if (!flags.literal && !hasConversion && type !== ParameterType.LITERAL) {
+      // 타입 변환이 필요한데 변환이 안된 경우 실패
+      failureReason = 'TypeConverter 함수가 제공되지 않음';
+      transformationSuccess = false;
+    } else {
+      // 성공 케이스: 리터럴이거나, 변환 성공했거나, 암호화 성공했거나
+      transformationSuccess = true;
+    }
+    
+    onInnerTrace({
+      type,
+      target: extractedValue,
+      convertedValue,
+      encryptedValue,
+      result: finalValue,
+      flags,
+      processingMode: ProcessingMode.SUBSTITUTION,
+      transformationSuccess,
+      failureReason
+    });
+  }
+  
+  // 문자열 치환 수행
+  console.log(`[DEBUG] Before replacement: "${text}"`);
+  console.log(`[DEBUG] Replacing "${pattern}" with "${finalValue}"`);
+  const result = text.replace(pattern, finalValue);
+  console.log(`[DEBUG] After replacement: "${result}"`);
+  
+  return result;
+};
+
 export const processSubstitution = async (
   content: string,
   typeConverter?: (value: string, type: ParameterType) => Promise<string>,
@@ -612,12 +774,12 @@ export const processSubstitution = async (
     encryptedValue: string | null;
     result: string;
     flags: ParameterFlags;
+    processingMode: ProcessingMode;
     transformationSuccess: boolean;
     failureReason?: string;
-  }) => void
+  }) => void,
+  filteringMode: FilteringMode = FilteringMode.DEFAULT
 ): Promise<string> => {
-  const result = content;
-  
   /**
    * 중첩된 중괄호를 스택으로 처리하는 내부 함수
    * 
@@ -638,28 +800,16 @@ export const processSubstitution = async (
       
       // 문자열을 순회하면서 중괄호 매칭
       for (let i = 0; i < processed.length; i++) {
-        const char = processed[i];
+        const currentChar = processed[i];
         
-        if (char === '{') {
+        if (currentChar === '{') {
           // 여는 중괄호 발견: 플래그 시작점 찾기
           if (stack.length === 0) {
             // 최상위 중괄호인 경우, 앞쪽에서 플래그 문자들 찾기
-            flagStart = i;
-            // 역순으로 e,r,v 문자들을 찾아서 플래그 시작점 결정
-            // 예: "PROC=!@r{NAME}" → r{ 부분에서 r이 플래그
-            for (let j = i - 1; j >= 0; j--) {
-              if (!['e', 'r', 'v'].includes(processed[j])) {
-                flagStart = j + 1; // 플래그가 아닌 문자 다음부터가 플래그 시작
-                break;
-              }
-              if (j === 0) {
-                flagStart = 0; // 문자열 시작까지 모두 플래그
-                break;
-              }
-            }
+            flagStart = findFlagStartPosition(processed, i);
           }
           stack.push({index: i, flagStart});
-        } else if (char === '}' && stack.length > 0) {
+        } else if (currentChar === '}' && stack.length > 0) {
           // 닫는 중괄호 발견: 매칭되는 여는 중괄호와 짝 맞추기
           const openBrace = stack.pop()!;
           
@@ -673,96 +823,17 @@ export const processSubstitution = async (
             const flagString = processed.substring(fullStart, openBrace.index);  // 플래그 부분
             const extractedValue = processed.substring(openBrace.index + 1, i);  // 중괄호 안 값
             
-            const flags = parseFlags(flagString);
-            const type = determineParameterType(extractedValue, flags);
-            
-            console.log(`[DEBUG] Found bracket: "${fullMatch}"`);
-            console.log(`[DEBUG] - flagString: "${flagString}"`);
-            console.log(`[DEBUG] - extractedValue: "${extractedValue}"`);
-            console.log(`[DEBUG] - flags:`, flags);
-            console.log(`[DEBUG] - type:`, type);
-            
-            let convertedValue: string | null = null;
-            let encryptedValue: string | null = null;
-            
-            // 1단계: 타입 변환 (A/B 타입인 경우만)
-            // 리터럴 플래그(v)가 없고, 변환 함수가 있고, A 또는 B 타입인 경우
-            if (!flags.literal && typeConverter && (type === ParameterType.A || type === ParameterType.B)) {
-              try {
-                convertedValue = await typeConverter(extractedValue, type);
-                console.log(`[DEBUG] - converted: "${convertedValue}"`);
-              } catch (error) {
-                console.error('Type conversion failed in substitution:', error);
-              }
-            }
-            
-            // 2단계: 암호화 (e 플래그가 있는 경우)
-            if (flags.encrypted && encryptor) {
-              // 암호화할 값 결정: 변환된 값 > 리터럴 값 > null 순서
-              const valueToEncrypt = convertedValue || (flags.literal ? extractedValue : null);
-              if (valueToEncrypt) {
-                try {
-                  encryptedValue = await encryptor(valueToEncrypt);
-                } catch (error) {
-                  console.error('Encryption failed in substitution:', error);
-                }
-              }
-            }
-            
-            // 3단계: 최종 값 결정 (우선순위 적용)
-            // 치환 모드에서의 값 우선순위:
-            // 1. 암호화된 값 (최우선) - e 플래그가 있으면
-            // 2. 변환된 값 - A/B 타입 변환 결과
-            // 3. 리터럴 값 - v 플래그가 있으면 원본 값 그대로
-            // 4. 빈 값 - 아무것도 없으면 빈 문자열로 치환
-            let finalValue: string;
-            if (encryptedValue) {
-              finalValue = encryptedValue; // 1. 암호화된 값 (최우선)
-            } else if (convertedValue) {
-              finalValue = convertedValue; // 2. 변환된 값
-            } else if (flags.literal) {
-              finalValue = extractedValue; // 3. 리터럴 값
-            } else {
-              finalValue = ''; // 4. 빈 값
-            }
-            
-            // 4단계: 내부 변환 추적 (onInnerTrace 콜백 호출)
-            if (onInnerTrace) {
-              // 변환 성공 여부 판단
-              const hasConversion = convertedValue !== null && convertedValue !== extractedValue;
-              const hasEncryption = encryptedValue !== null;
-              const isChanged = extractedValue !== finalValue;
-              
-              // 실패 이유 결정
-              let failureReason: string | undefined;
-              if (!hasConversion && type !== ParameterType.LITERAL && !flags.literal) {
-                if (type === ParameterType.UNKNOWN) {
-                  failureReason = `알 수 없는 타입: "${extractedValue}"가 A/B 타입 목록에 없음`;
-                } else if (!typeConverter) {
-                  failureReason = 'TypeConverter 함수가 제공되지 않음';
-                }
-              }
-              if (flags.encrypted && !encryptedValue && !encryptor) {
-                failureReason = 'Encryptor 함수가 제공되지 않음';
-              }
-              
-              onInnerTrace({
-                type,
-                target: extractedValue,
-                convertedValue,
-                encryptedValue,
-                result: finalValue,
-                flags,
-                transformationSuccess: isChanged || hasConversion || hasEncryption || flags.literal,
-                failureReason
-              });
-            }
-            
-            // 5단계: 문자열에서 실제 치환 수행
-            console.log(`[DEBUG] Before replacement: "${processed}"`);
-            console.log(`[DEBUG] Replacing "${fullMatch}" with "${finalValue}"`);
-            processed = processed.substring(0, fullStart) + finalValue + processed.substring(fullEnd);
-            console.log(`[DEBUG] After replacement: "${processed}"`);
+            // 헬퍼 함수를 사용하여 중괄호 패턴 처리
+            processed = await processSingleBracketPattern(
+              processed,
+              fullMatch,
+              flagString,
+              extractedValue,
+              typeConverter,
+              encryptor,
+              onInnerTrace,
+              filteringMode
+            );
             
             // 변화가 있었으므로 다시 처리 (바깥쪽 중괄호가 있을 수 있음)
             hasChanges = true;
@@ -775,7 +846,7 @@ export const processSubstitution = async (
     return processed;
   };
   
-  return await processNestedBrackets(result);
+  return await processNestedBrackets(content);
 };
 
 /**
@@ -828,4 +899,145 @@ export const detectProcessingMode = (value: string): ProcessingMode => {
   // 예: "PROC=!@r{NAME}", "v{TEXT}.com", "복잡한구조{값}더복잡"
   console.log(`[DEBUG] Substitution mode detected: ${value} (mixed structure)`);
   return ProcessingMode.SUBSTITUTION;
+};
+
+/**
+ * 엄격한 필터링 모드에서 값이 포함 가능한지 검증하는 함수
+ * 
+ * 엄격한 필터링 모드란:
+ * - 일반 문자열과 v(리터럴) 형식만 허용
+ * - 변환이 필요한 값({A_TYPE}, {B_TYPE} 등)이 하나라도 있으면 전체 제외
+ * 
+ * SUBSTITUTION 모드에서의 특별 처리:
+ * - 문자열 내부에 변환 영역이 하나라도 있으면 전체 파라미터 제외
+ * - 예: where=AND!=e{TEXT}AND!=v{DEV} → e{TEXT} 때문에 where 전체 제외
+ * 
+ * @param value 검사할 값
+ * @param processingMode 처리 모드
+ * @returns true면 포함 가능, false면 제외
+ */
+export const isStrictModeValid = (value: string, processingMode: ProcessingMode): boolean => {
+  // 1. 일반 문자열인 경우 (중괄호가 없음)
+  if (!value.includes('{') || !value.includes('}')) {
+    return true; // 일반 문자열은 포함
+  }
+  
+  // 2. PARAMETER 모드인 경우
+  if (processingMode === ProcessingMode.PARAMETER) {
+    // v{...} 형태 또는 플래그 없는 {...} 형태인지 확인
+    const isLiteral = /^v\{[^{}]+\}$/.test(value);
+    const isBasicType = /^\{[^{}]+\}$/.test(value); // 플래그 없는 기본 타입 변환
+    return isLiteral || isBasicType;
+  }
+  
+  // 3. SUBSTITUTION 모드인 경우
+  if (processingMode === ProcessingMode.SUBSTITUTION) {
+    // 플래그가 있는 패턴 찾기 (e, r 등의 플래그가 있는 모든 중괄호 패턴)
+    // 허용: v{...}, {...} (플래그 없음)
+    // 제외: e{...}, r{...}, er{...}, ev{...}, rv{...}, rev{...} 등
+    const hasFlaggedPattern = /[er]+\{[^}]+\}/.test(value);
+    
+    return !hasFlaggedPattern;
+  }
+  
+  return false;
+};
+
+/**
+ * 파싱된 세그먼트가 엄격한 필터링 모드에서 유효한지 검증
+ * 
+ * @param segment 파싱된 세그먼트
+ * @param filteringMode 필터링 모드
+ * @returns true면 포함, false면 제외
+ */
+export const isSegmentValidForFilteringMode = (
+  segment: { originalValue: string; flags: ParameterFlags; type: ParameterType; processingMode: ProcessingMode },
+  filteringMode: FilteringMode
+): boolean => {
+  // 기본 모드에서는 기존 isValidValue 로직 사용
+  if (filteringMode === FilteringMode.DEFAULT) {
+    return true; // transformService에서 isValidValue로 처리
+  }
+  
+  // 엄격한 모드에서의 검증
+  if (filteringMode === FilteringMode.STRICT) {
+    // 리터럴 값은 항상 포함
+    if (segment.flags.literal) {
+      return true;
+    }
+    
+    // 중괄호가 없는 일반 문자열인지 확인
+    if (!segment.originalValue.includes('{') || !segment.originalValue.includes('}')) {
+      return true;
+    }
+    
+    // SUBSTITUTION 모드에서는 전체 문자열 검사
+    if (segment.processingMode === ProcessingMode.SUBSTITUTION) {
+      return isStrictModeValid(segment.originalValue, segment.processingMode);
+    }
+    
+    // PARAMETER 모드에서는 v 플래그 또는 플래그 없는 기본 타입 변환 허용
+    if (segment.flags.literal) {
+      return true; // v{...} 패턴
+    }
+    
+    // 플래그 없는 기본 타입 변환인지 확인 ({A_TYPE_1}, {B_TYPE_2} 등)
+    const hasNoFlags = !segment.flags.encrypted && !segment.flags.required && !segment.flags.literal;
+    const isBasicPattern = /^\{[^{}]+\}$/.test(segment.originalValue);
+    return hasNoFlags && isBasicPattern;
+  }
+  
+  return true;
+};
+
+/**
+ * 파싱된 쿼리가 엄격한 필터링 모드에서 유효한지 검증
+ * 
+ * 쿼리는 URL 세그먼트와 다른 필터링 규칙을 적용:
+ * - URL 세그먼트: 기본 타입 변환({A_TYPE_1}) 허용
+ * - 쿼리 파라미터: 오직 일반 문자열과 v{} 리터럴만 허용
+ * 
+ * @param query 파싱된 쿼리
+ * @param filteringMode 필터링 모드
+ * @returns true면 포함, false면 제외
+ */
+export const isQueryValidForFilteringMode = (
+  query: { originalValue: string; flags: ParameterFlags; type: ParameterType; processingMode: ProcessingMode },
+  filteringMode: FilteringMode
+): boolean => {
+  // 기본 모드에서는 모든 쿼리 포함
+  if (filteringMode === FilteringMode.DEFAULT) {
+    return true;
+  }
+  
+  // 엄격한 모드에서의 쿼리 검증
+  if (filteringMode === FilteringMode.STRICT) {
+    // 0. 전역 쿼리는 항상 포함 (전역 플래그가 있는 경우)
+    // ?e{name=v{NAME}&age={AGE}} 같은 케이스에서 전역 e 플래그가 있으면 포함
+    if (query.type === ParameterType.GLOBAL) {
+      return true; // 전역 쿼리는 STRICT 모드에서도 항상 처리
+    }
+    
+    // 1. SUBSTITUTION 모드는 항상 포함 (변환 후 결과로 판단)
+    // where={!=$v{NAME}&{A_TYPE_1}} 같은 케이스에서 실제 치환 결과로 판단
+    if (query.processingMode === ProcessingMode.SUBSTITUTION) {
+      return true; // 변환 후 finalValue가 비어있으면 나중에 제외됨
+    }
+    
+    // 2. v{} 리터럴 패턴은 항상 포함
+    if (query.flags.literal) {
+      return true;
+    }
+    
+    // 3. 중괄호가 없는 일반 문자열은 포함
+    if (!query.originalValue.includes('{') || !query.originalValue.includes('}')) {
+      return true;
+    }
+    
+    // 4. 중괄호가 있는 PARAMETER 모드는 제외
+    // 예: {A_TYPE_1}, e{A_TYPE_1}, r{B_TYPE_1}, er{값} 등 모두 제외
+    return false;
+  }
+  
+  return true;
 };

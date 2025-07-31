@@ -11,6 +11,11 @@ export enum ProcessingMode {
   SUBSTITUTION = 'SUBSTITUTION' // where=e{...} - 값 없으면 빈값으로 치환
 }
 
+export enum FilteringMode {
+  DEFAULT = 'DEFAULT',     // 기본 모드: 변환 가능한 모든 값 포함
+  STRICT = 'STRICT'        // 엄격한 모드: 일반 문자열과 v(리터럴)만 포함
+}
+
 export interface ParameterFlags {
   encrypted: boolean;
   required: boolean;
@@ -83,8 +88,5 @@ export interface ParseResult {
 export type TypeConverter = (value: string, type: ParameterType) => Promise<string>;
 export type Encryptor = (value: string) => Promise<string>;
 
-export const ATYPE_VALUES = ['A_TYPE_1', 'A_TYPE_2', 'A_TYPE_3', 'A_TYPE_4', 'A_TYPE_5', 'PROC', 'NAME'] as const;
-export const BTYPE_VALUES = ['B_TYPE_1', 'B_TYPE_2', 'B_TYPE_3', 'B_TYPE_4'] as const;
-
-export type ATypeValue = typeof ATYPE_VALUES[number];
-export type BTypeValue = typeof BTYPE_VALUES[number];
+// 타입 값들은 별도 파일로 분리
+export { ATYPE_VALUES, BTYPE_VALUES, type ATypeValue, type BTypeValue } from '../constants/typeValues';

@@ -1,4 +1,3 @@
-export { useUrlQueryParser } from './hooks/useUrlQueryParser';
 export { useParseState } from './hooks/useParseState';
 
 export type { 
@@ -11,7 +10,8 @@ export type {
   TypeConverter,
   Encryptor,
   ATypeValue,
-  BTypeValue
+  BTypeValue,
+  FilteringMode
 } from './types/parser.types';
 
 export { 

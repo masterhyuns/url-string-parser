@@ -1,0 +1,136 @@
+@startuml Refactored Architecture
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam class {
+  BackgroundColor #E8F5E8
+  BorderColor #4CAF50
+  ArrowColor #2E7D32
+}
+skinparam note {
+  BackgroundColor #FFF3E0
+  BorderColor #FF9800
+}
+
+title URL Parser - 리팩터링된 아키텍처 구조
+
+package "useParseState Hook" as hook {
+  class useParseState {
+    + parseResult: ParseResult
+    + updateParseResult()
+    + getReconstructedUrl()
+    + encryptGlobalQueries()
+    --
+    - filterGlobalQueryForStrict()
+    - shouldIncludeQueryInStrict()
+    - processGlobalQuery()
+    - processRegularQuery()
+  }
+  
+  note right of useParseState
+    **리팩터링 개선점:**
+    - 복잡한 getReconstructedUrl을 4개 함수로 분리
+    - 각 함수가 단일 책임만 담당
+    - 가독성과 테스트 용이성 향상
+  end note
+}
+
+package "Transform Service" as transform {
+  class transformParameter {
+    + transformParameter()
+    --
+    - handleSubstitutionMode()
+    - handleParameterMode()
+    - handleEncryption()
+  }
+  
+  class transformSegments {
+    + transformSegments()
+    --
+    - handleSegmentSubstitution()
+  }
+  
+  class transformQueries {
+    + transformQueries()
+    --
+    - handleQuerySubstitution()
+  }
+  
+  note right of transformParameter
+    **함수 분해:**
+    - 원래 100+ 라인 함수를 
+      3개의 작은 함수로 분리
+    - 각 처리 모드별 명확한 분리
+  end note
+}
+
+package "Constants" as constants {
+  class mockData {
+    + MOCK_TYPE_A_DATA
+    + MOCK_TYPE_B_DATA
+    + ENCRYPTION_PREFIX
+  }
+  
+  class typeValues {
+    + ATYPE_VALUES
+    + BTYPE_VALUES
+    + ATypeValue
+    + BTypeValue
+  }
+  
+  note right of constants
+    **상수 중앙화:**
+    - 중복 제거
+    - 단일 책임 원칙
+    - 유지보수성 향상
+  end note
+}
+
+package "Core Functions" as core {
+  class "Parser Utils" as utils {
+    + parseUrlComponents()
+    + detectParameterType()
+    + parseFlags()
+    + processSubstitution()
+  }
+  
+  class "URL Parser" as urlParser {
+    + parseUrlSegments()
+  }
+  
+  class "Query Parser" as queryParser {
+    + parseQueryString()
+    + parseNestedStructure()
+  }
+}
+
+' 관계 정의
+hook ||--|| transform : 사용
+hook ||--|| core : 사용
+transform ||--|| core : 사용
+hook ||--|| constants : 사용
+transform ||--|| constants : 사용
+
+' 처리 흐름
+useParseState --> transformParameter : "변환 요청"
+useParseState --> transformSegments : "세그먼트 변환"
+useParseState --> transformQueries : "쿼리 변환"
+
+transformParameter --> handleSubstitutionMode : "치환 모드"
+transformParameter --> handleParameterMode : "파라미터 모드"
+transformParameter --> handleEncryption : "암호화"
+
+useParseState --> filterGlobalQueryForStrict : "STRICT 필터링"
+useParseState --> shouldIncludeQueryInStrict : "쿼리 검증"
+useParseState --> processGlobalQuery : "전역 쿼리"
+useParseState --> processRegularQuery : "일반 쿼리"
+
+' 색상 및 스타일
+skinparam class<<improved>> {
+  BackgroundColor #C8E6C9
+  BorderColor #388E3C
+}
+
+class useParseState <<improved>>
+class transformParameter <<improved>>
+
+@enduml

@@ -1,66 +1,84 @@
-@startuml Processing Flow Diagram
+@startuml Processing Flow Diagram - Updated
 !theme plain
 skinparam backgroundColor #FFFFFF
+skinparam activity {
+  BackgroundColor #E3F2FD
+  BorderColor #1976D2
+  FontName Arial
+}
 
-title URL Parser - Processing Flow & Mode Detection
+title URL Parser - Modern Processing Flow (리팩터링 후)
 
 start
 
 :입력 URL 수신;
-note right: http://localhost/v{TEXT}.com?where=e{PROC=!@r{NAME}}
+note right: http://localhost/{A_TYPE_1}?e{name={@@v{A_TYPE_1}}}
 
-:URL 컴포넌트 분리;
+:useParseState Hook 호출;
 note right
-  - protocol: http
-  - host: localhost
-  - path: /v{TEXT}.com
-  - query: where=e{PROC=!@r{NAME}}
+  - typeConverter (선택적)
+  - encryptor (선택적) 
+  - filteringMode (DEFAULT/STRICT)
+end note
+
+:parseUrlComponents;
+note right
+  - 정규식 기반 URL 분해
+  - 커스텀 프로토콜 지원
+  - protocol, host, path, query 분리
 end note
 
 fork
-  :URL 세그먼트 파싱;
-  :각 세그먼트별 모드 감지;
+  :URL 세그먼트 처리;
+  :parseUrlSegments;
   
+  :각 세그먼트별 모드 감지;
   if (detectProcessingMode?) then (PARAMETER)
+    :e{A_TYPE_1} 형태;
     :extractValueWithBrackets;
-    note right: e{A_TYPE_1} → 플래그='e', 값='A_TYPE_1'
-    :타입 변환 + 암호화;
+    note right: 플래그='e', 타입='A', 값='A_TYPE_1'
   else (SUBSTITUTION)
+    :v{TEXT}.com 형태;
     :processSubstitution;
-    note right: v{TEXT}.com → TEXT.com
-    :스택 기반 중괄호 파싱;
+    note right: 스택 기반 중괄호 매칭
   endif
   
   :transformSegments;
+  note right
+    - handleSubstitutionMode
+    - handleParameterMode
+    - handleEncryption
+  end note
 
 fork again
-  :쿼리스트링 파싱;
-  :전역 플래그 확인;
+  :쿼리스트링 처리;
+  :parseQueryString;
   
-  if (전역 플래그 존재?) then (YES)
+  if (전역 쿼리?) then (YES)
+    :?e{...} 패턴 감지;
     :parseNestedStructure;
-    :내부 쿼리들 파싱;
+    note right
+      내부 쿼리들을 개별 파싱
+      name={@@v{A_TYPE_1}} 처리
+    end note
     :processGlobalQuery;
     note right
-      1. 내부 쿼리 변환
-      2. 재구성
-      3. 전체 암호화
+      1. 내부 변환 (DEFAULT 모드)
+      2. transformationTraces 생성
+      3. 암호화는 재구성 시점으로 연기
     end note
   else (NO)
+    :일반 쿼리 처리;
     :smartSplitQuery;
-    note right: 중괄호 고려한 안전한 분할
     
     :각 쿼리별 모드 감지;
-    
     if (detectProcessingMode?) then (PARAMETER)
-      :extractValueWithBrackets;
+      :name={A_TYPE_1} 형태;
       :transformParameter;
     else (SUBSTITUTION)
-      :processSubstitution;
-      note right
-        PROC=!@r{NAME}
-        → PROC=!@NAME_VALUE
-      end note
+      :where=PROC=!@r{NAME} 형태;
+      :handleQuerySubstitution;
+      note right: 내부 추적 콜백 포함
     endif
   endif
   
@@ -68,11 +86,63 @@ fork again
 
 end fork
 
-:최종 URL 재구성;
+:모든 변환 완료 (DEFAULT 모드);
 note right
-  - baseUrl + reconstructedPath
-  - + queryString
-  - 결과: http://localhost/TEXT.com?where=ENC[PROC=!@NAME_VALUE]
+  - 파싱 단계에서는 필터링하지 않음
+  - 모든 변환 결과를 parseResult에 저장
+  - transformationTraces 수집
+end note
+
+:getReconstructedUrl 호출;
+note right: 필터링 모드에 따른 최종 처리
+
+if (filteringMode?) then (STRICT)
+  :STRICT 모드 필터링;
+  
+  fork
+    :URL 세그먼트;
+    note right: 세그먼트는 항상 모두 포함
+  fork again
+    :일반 쿼리 필터링;
+    :shouldIncludeQueryInStrict;
+    note right
+      - 리터럴과 일반 문자열만 허용
+      - transformationTraces 기반 검증
+      - SUBSTITUTION 내부 분석
+    end note
+  fork again
+    :전역 쿼리 필터링;
+    :filterGlobalQueryForStrict;
+    note right
+      내부 결과를 STRICT 규칙으로 필터링
+      유효한 결과만 재구성
+    end note
+  end fork
+  
+else (DEFAULT)
+  :DEFAULT 모드 처리;
+  note right: 모든 유효한 값 포함
+endif
+
+:전역 쿼리 암호화 처리;
+if ([ENCRYPT:...] 패턴 존재?) then (YES)
+  :encryptGlobalQueries 호출;
+  note right
+    - 별도 비동기 처리
+    - 실제 암호화 함수 호출
+    - 최종 URL 생성
+  end note
+else (NO)
+  :재구성된 URL 반환;
+endif
+
+:최종 결과;
+note right
+  STRICT 모드 예시:
+  http://localhost/A_TYPE_1_VALUE?ENC[name=@@A_TYPE_1]
+  
+  DEFAULT 모드 예시:
+  http://localhost/A_TYPE_1_VALUE?ENC[name=@@A_TYPE_1_VALUE]
 end note
 
 stop

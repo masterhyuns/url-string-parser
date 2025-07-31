@@ -12,6 +12,70 @@ import {
 import { getFinalValue, processSubstitution } from '../utils/parser.utils';
 
 /**
+ * SUBSTITUTION 모드 변환을 처리하는 함수
+ */
+const handleSubstitutionMode = async <T extends ParsedParameter>(
+  param: T,
+  typeConverter?: TypeConverter,
+  encryptor?: Encryptor,
+  onInnerTrace?: (trace: Omit<TransformationTrace, 'location' | 'identifier'>, location: 'url' | 'query', identifier: string) => void
+): Promise<string> => {
+  return await processSubstitution(
+    param.extractedValue || param.originalValue,
+    typeConverter,
+    encryptor,
+    onInnerTrace ? (trace) => {
+      const location = 'key' in param ? 'query' : 'url';
+      const identifier = 'key' in param ? (param as { key: string }).key : 'segment';
+      onInnerTrace(trace, location, identifier);
+    } : undefined
+  );
+};
+
+/**
+ * PARAMETER 모드 변환을 처리하는 함수
+ */
+const handleParameterMode = async <T extends ParsedParameter>(
+  param: T,
+  typeConverter?: TypeConverter
+): Promise<string | null> => {
+  if (param.extractedValue && !param.flags.literal) {
+    if (typeConverter && param.type !== ParameterType.UNKNOWN && param.type !== ParameterType.LITERAL) {
+      try {
+        return await typeConverter(param.extractedValue, param.type);
+      } catch (error) {
+        console.error('Type conversion failed:', error);
+      }
+    }
+  }
+  return null;
+};
+
+/**
+ * 암호화 처리를 수행하는 함수
+ */
+const handleEncryption = async (
+  param: ParsedParameter,
+  convertedValue: string | null,
+  encryptor?: Encryptor
+): Promise<string | null> => {
+  if (!param.flags.encrypted || !encryptor) {
+    return null;
+  }
+
+  // 암호화할 값 선택: 변환값 > 리터럴값 > null
+  const valueToEncrypt = convertedValue || (param.flags.literal ? param.extractedValue : null);
+  if (valueToEncrypt) {
+    try {
+      return await encryptor(valueToEncrypt);
+    } catch (error) {
+      console.error('Encryption failed:', error);
+    }
+  }
+  return null;
+};
+
+/**
  * 파싱된 파라미터를 실제 값으로 변환하는 핵심 함수
  * 
  * 이 함수가 처리하는 변환 과정:
@@ -41,57 +105,22 @@ export const transformParameter = async <T extends ParsedParameter>(
   encryptor?: Encryptor,
   onInnerTrace?: (trace: Omit<TransformationTrace, 'location' | 'identifier'>, location: 'url' | 'query', identifier: string) => void
 ): Promise<T> => {
-  console.log(`[DEBUG] transformParameter called for: "${'key' in param ? (param as { key: string }).key : 'no-key'}"`);
-  console.log(`[DEBUG] - processingMode: ${'processingMode' in param ? (param as { processingMode: ProcessingMode }).processingMode : 'N/A'}`);
-  console.log(`[DEBUG] - type: ${param.type}`);
-  console.log(`[DEBUG] - flags:`, param.flags);
   
+  // 1단계: 처리 모드별 변환 (항상 DEFAULT 모드로 처리)
   let convertedValue: string | null = null;
-  let encryptedValue: string | null = null;
   
-  // 1단계: 처리 모드별 변환
   if ('processingMode' in param && (param as { processingMode: ProcessingMode }).processingMode === ProcessingMode.SUBSTITUTION) {
     // 치환 모드: 복잡한 문자열 내부의 중괄호들을 처리
-    // 예: "PROC=!@r{NAME}" → "PROC=!@NAME_VALUE"
-    console.log(`[DEBUG] Processing substitution for: "${'key' in param ? (param as { key: string }).key : 'no-key'}"`);
-    console.log(`[DEBUG] - extractedValue: "${param.extractedValue}"`);
-    
-    const substitutedValue = await processSubstitution(
-      param.extractedValue || param.originalValue,
-      typeConverter,
-      encryptor,
-      onInnerTrace ? (trace) => onInnerTrace({...trace, processingMode: ProcessingMode.SUBSTITUTION}, 'key' in param ? 'query' : 'url', 'key' in param ? (param as { key: string }).key : 'segment') : undefined
-    );
-    console.log(`[DEBUG] - substitutedValue: "${substitutedValue}"`);
-    
-    convertedValue = substitutedValue;
+    convertedValue = await handleSubstitutionMode(param, typeConverter, encryptor, onInnerTrace);
   } else {
     // 파라미터 모드: 단순 값 변환
-    // 예: e{A_TYPE_1} → A_TYPE_1_VALUE
-    if (param.extractedValue && !param.flags.literal) {
-      if (typeConverter && param.type !== ParameterType.UNKNOWN && param.type !== ParameterType.LITERAL) {
-        try {
-          convertedValue = await typeConverter(param.extractedValue, param.type);
-        } catch (error) {
-          console.error('Type conversion failed:', error);
-        }
-      }
-    }
+    convertedValue = await handleParameterMode(param, typeConverter);
   }
   
-  // 2단계: 암호화 처리 (모든 모드에서 동일)
-  if (param.flags.encrypted && encryptor) {
-    // 암호화할 값 선택: 변환값 > 리터럴값 > null
-    const valueToEncrypt = convertedValue || (param.flags.literal ? param.extractedValue : null);
-    if (valueToEncrypt) {
-      try {
-        encryptedValue = await encryptor(valueToEncrypt);
-      } catch (error) {
-        console.error('Encryption failed:', error);
-      }
-    }
-  }
+  // 2단계: 암호화 처리
+  const encryptedValue = await handleEncryption(param, convertedValue, encryptor);
   
+  // 3단계: 최종값 결정
   const finalValue = getFinalValue(
     param.originalValue,
     param.extractedValue,
@@ -132,6 +161,37 @@ export const transformParameter = async <T extends ParsedParameter>(
  * @param encryptor 암호화 함수 (선택적)
  * @returns 변환 완료된 세그먼트 배열
  */
+/**
+ * SUBSTITUTION 모드 세그먼트를 처리하는 함수
+ */
+const handleSegmentSubstitution = async (
+  segment: ParsedSegment,
+  typeConverter?: TypeConverter,
+  encryptor?: Encryptor,
+  segmentIndex: number,
+  onInnerTrace?: (trace: Omit<TransformationTrace, 'location' | 'identifier'>, location: 'url' | 'query', identifier: string) => void
+): Promise<ParsedSegment> => {
+  // 치환 모드 특별 처리: v{TEXT}.com → TEXT.com
+  const substitutedValue = await processSubstitution(
+    segment.extractedValue || segment.originalValue,
+    typeConverter,
+    encryptor,
+    onInnerTrace ? (trace) => {
+      onInnerTrace(trace, 'url', `segment-${segmentIndex}`);
+    } : undefined
+  );
+  
+  // 치환 후 추가 암호화 (e 플래그가 있는 경우)
+  const encryptedValue = await handleEncryption(segment, substitutedValue, encryptor);
+  
+  return {
+    ...segment,
+    convertedValue: substitutedValue,
+    encryptedValue,
+    finalValue: encryptedValue || substitutedValue
+  };
+};
+
 export const transformSegments = async (
   segments: ParsedSegment[],
   typeConverter?: TypeConverter,
@@ -139,38 +199,13 @@ export const transformSegments = async (
   onInnerTrace?: (trace: Omit<TransformationTrace, 'location' | 'identifier'>, location: 'url' | 'query', identifier: string) => void
 ): Promise<ParsedSegment[]> => {
   return Promise.all(
-    segments.map(async (segment) => {
+    segments.map(async (segment, index) => {
       if (segment.processingMode === ProcessingMode.SUBSTITUTION) {
-        // 치환 모드 특별 처리: v{TEXT}.com → TEXT.com
-        console.log(`[DEBUG] Processing URL segment substitution: "${segment.segment}"`);
-        const substitutedValue = await processSubstitution(
-          segment.extractedValue || segment.originalValue,
-          typeConverter,
-          encryptor,
-          onInnerTrace ? (trace) => onInnerTrace({...trace, processingMode: ProcessingMode.SUBSTITUTION}, 'url', `segment-${segments.indexOf(segment)}`) : undefined
-        );
-        console.log(`[DEBUG] - substitutedValue: "${substitutedValue}"`);
-        
-        // 치환 후 추가 암호화 (e 플래그가 있는 경우)
-        let encryptedValue: string | null = null;
-        if (segment.flags.encrypted && encryptor && substitutedValue) {
-          try {
-            encryptedValue = await encryptor(substitutedValue);
-          } catch (error) {
-            console.error('Encryption failed in URL segment substitution mode:', error);
-          }
-        }
-        
-        return {
-          ...segment,
-          convertedValue: substitutedValue,
-          encryptedValue,
-          finalValue: encryptedValue || substitutedValue
-        };
+        return handleSegmentSubstitution(segment, typeConverter, encryptor, index, onInnerTrace);
       } else {
         // 파라미터 모드: 표준 변환 로직 적용
         return transformParameter(segment, typeConverter, encryptor, onInnerTrace ? 
-          (trace: Omit<TransformationTrace, 'location' | 'identifier'>) => onInnerTrace(trace, 'url', `segment-${segments.indexOf(segment)}`) : undefined);
+          (trace: Omit<TransformationTrace, 'location' | 'identifier'>) => onInnerTrace(trace, 'url', `segment-${index}`) : undefined);
       }
     })
   );
@@ -199,6 +234,36 @@ export const transformSegments = async (
  * @param encryptor 암호화 함수 (선택적)
  * @returns 변환 완료된 쿼리 배열
  */
+/**
+ * SUBSTITUTION 모드 쿼리를 처리하는 함수
+ */
+const handleQuerySubstitution = async (
+  query: ParsedQuery,
+  typeConverter?: TypeConverter,
+  encryptor?: Encryptor,
+  onInnerTrace?: (trace: Omit<TransformationTrace, 'location' | 'identifier'>, location: 'url' | 'query', identifier: string) => void
+): Promise<ParsedQuery> => {
+  // 치환 모드: where=PROC=!@r{NAME} → where=PROC=!@NAME_VALUE
+  const substitutedValue = await processSubstitution(
+    query.extractedValue || query.originalValue,
+    typeConverter,
+    encryptor,
+    onInnerTrace ? (trace) => {
+      onInnerTrace(trace, 'query', query.key);
+    } : undefined
+  );
+  
+  // 치환 후 추가 암호화 (e 플래그가 있는 경우)
+  const encryptedValue = await handleEncryption(query, substitutedValue, encryptor);
+  
+  return {
+    ...query,
+    convertedValue: substitutedValue,
+    encryptedValue,
+    finalValue: encryptedValue || substitutedValue
+  };
+};
+
 export const transformQueries = async (
   queries: ParsedQuery[],
   typeConverter?: TypeConverter,
@@ -214,33 +279,7 @@ export const transformQueries = async (
       
       // 2순위: 치환 모드 처리
       if (query.processingMode === ProcessingMode.SUBSTITUTION) {
-        // 치환 모드: where=PROC=!@r{NAME} → where=PROC=!@NAME_VALUE
-        console.log(`[DEBUG] Processing substitution for: "${query.key}"`);
-        console.log(`[DEBUG] - extractedValue: "${query.extractedValue}"`);
-        const substitutedValue = await processSubstitution(
-          query.extractedValue || query.originalValue,
-          typeConverter,
-          encryptor,
-          onInnerTrace ? (trace) => onInnerTrace({...trace, processingMode: ProcessingMode.SUBSTITUTION}, 'query', query.key) : undefined
-        );
-        console.log(`[DEBUG] - substitutedValue: "${substitutedValue}"`);
-        
-        // 치환 후 추가 암호화 (e 플래그가 있는 경우)
-        let encryptedValue: string | null = null;
-        if (query.flags.encrypted && encryptor && substitutedValue) {
-          try {
-            encryptedValue = await encryptor(substitutedValue);
-          } catch (error) {
-            console.error('Encryption failed in substitution mode:', error);
-          }
-        }
-        
-        return {
-          ...query,
-          convertedValue: substitutedValue,
-          encryptedValue,
-          finalValue: encryptedValue || substitutedValue
-        };
+        return handleQuerySubstitution(query, typeConverter, encryptor, onInnerTrace);
       } else {
         // 3순위: 파라미터 모드 (표준 로직)
         return transformParameter(query, typeConverter, encryptor, onInnerTrace ? 
@@ -282,14 +321,9 @@ const processGlobalQuery = async (
 ): Promise<GlobalParsedQuery> => {
   // 1단계: 내부 쿼리들을 먼저 개별 변환
   // globalQuery.innerResults는 parseQueryString에서 생성된 내부 쿼리들
-  console.log(`[DEBUG] processGlobalQuery - inner results count: ${globalQuery.innerResults.length}`);
-  globalQuery.innerResults.forEach((inner: ParsedQuery, i: number) => {
-    console.log(`[DEBUG] Inner ${i+1}: ${inner.key} = ${inner.value} (mode: ${inner.processingMode})`);
-  });
   
   const transformedInnerResults = await Promise.all(
-    globalQuery.innerResults.map((innerQuery: ParsedQuery, index: number) => {
-      console.log(`[DEBUG] Processing inner query ${index}: ${innerQuery.key} (mode: ${innerQuery.processingMode})`);
+    globalQuery.innerResults.map((innerQuery: ParsedQuery) => {
       // 모든 내부 쿼리에 onInnerTrace 콜백 전달
       // SUBSTITUTION 모드인 경우 processSubstitution 내부에서 개별 변환 추적
       const innerTraceCallback = onInnerTrace ? 
@@ -302,23 +336,17 @@ const processGlobalQuery = async (
   
   // 2단계: 변환된 내부 결과들을 쿼리스트링 형태로 재구성
   // [name=A_TYPE_1_VALUE, value=test] → "name=A_TYPE_1_VALUE&value=test"
+  // 파싱 단계에서는 필터링하지 않고 모든 결과 포함
   const reconstructedContent = transformedInnerResults
-    .filter(q => q.finalValue) // 빈 값 제외 (유효하지 않은 변환 결과)
+    .filter(q => q.finalValue) // 빈 값만 제외
     .map(q => `${q.key}=${q.finalValue}`)
     .join('&');
   
-  // 3단계: 전체 문자열 암호화 (전역 e 플래그가 있는 경우)
-  let finalValue = reconstructedContent;
-  let encryptedValue: string | null = null;
+  // 3단계: 내부 변환 결과만 저장, 전체 암호화는 getReconstructedUrl에서 처리
+  const finalValue = reconstructedContent;
+  const encryptedValue: string | null = null;
   
-  if (globalQuery.flags.encrypted && encryptor && reconstructedContent) {
-    try {
-      encryptedValue = await encryptor(reconstructedContent);
-      finalValue = encryptedValue; // 암호화된 값이 최종 결과
-    } catch (error) {
-      console.error('Global encryption failed:', error);
-    }
-  }
+  // 전역 암호화는 getReconstructedUrl에서 필터링 후에 처리
   
   return {
     ...globalQuery,

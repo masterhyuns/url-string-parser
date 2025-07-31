@@ -1,3 +1,4 @@
+'use client';
 import { UrlParserDemo } from '@/src/components/UrlParserDemo';
 
 export default function Home() {

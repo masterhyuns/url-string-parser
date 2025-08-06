@@ -1,0 +1,501 @@
+// shared/ui/grid/components/grid-table/grid-table.module.scss
+
+/* === 그리드 컨테이너 (Flexbox로 전체 레이아웃) === */
+.grid {
+position: relative;
+width: 100%;
+height: 100%;
+border: 1px solid var(–border-color, #e0e0e0);
+border-radius: 8px;
+background-color: var(–grid-bg, #ffffff);
+font-family: var(–font-family, -apple-system, BlinkMacSystemFont, ‘Segoe UI’, Roboto, sans-serif);
+
+/* Flexbox로 헤더-바디-페이지네이션 배치 */
+display: flex;
+flex-direction: column;
+overflow: hidden;
+
+/* 로딩 상태 */
+&.loading {
+position: relative;
+}
+}
+
+/* === 테이블 영역 (CSS Grid 사용) === */
+.table {
+flex: 1; /* 페이지네이션을 제외한 모든 공간 사용 */
+display: flex;
+flex-direction: column;
+min-height: 0; /* flex 축소 허용 */
+background-color: transparent;
+}
+
+/* === 헤더 (CSS Grid) === */
+.header {
+/* CSS Grid로 컬럼 정렬 */
+display: grid;
+/* gridTemplateColumns는 JavaScript에서 동적으로 설정됨 */
+
+background-color: var(–header-bg, #f8f9fa);
+border-bottom: 2px solid var(–header-border, #dee2e6);
+flex-shrink: 0; /* 헤더는 축소되지 않음 */
+position: sticky;
+top: 0;
+z-index: 10;
+}
+
+.headerCell {
+padding: 12px 16px;
+font-weight: 600;
+font-size: 14px;
+color: var(–header-text, #495057);
+border-right: 1px solid var(–cell-border, #e9ecef);
+background-color: inherit;
+user-select: none;
+
+/* Flexbox로 내부 콘텐츠 정렬 */
+display: flex;
+align-items: center;
+justify-content: flex-start;
+
+/* 텍스트 오버플로우 방지 */
+overflow: hidden;
+white-space: nowrap;
+
+/* 정렬 가능한 컬럼 */
+&.sortable {
+cursor: pointer;
+transition: background-color 0.2s ease;
+
+```
+&:hover {
+  background-color: var(--header-hover, #e9ecef);
+}
+
+&:active {
+  background-color: var(--header-active, #dee2e6);
+}
+```
+
+}
+
+/* 정렬 방향별 정렬 */
+&.alignCenter {
+justify-content: center;
+}
+
+&.alignRight {
+justify-content: flex-end;
+}
+
+/* 마지막 셀 테두리 제거 */
+&:last-child {
+border-right: none;
+}
+}
+
+.headerContent {
+display: flex;
+align-items: center;
+gap: 6px;
+
+span {
+flex-shrink: 0;
+}
+}
+
+.sortIcon {
+font-size: 12px;
+color: var(–sort-icon, #6c757d);
+font-weight: bold;
+transition: color 0.2s ease;
+flex-shrink: 0;
+line-height: 1;
+
+&.ascending,
+&.descending {
+color: var(–sort-active, #007bff);
+}
+}
+
+/* === 바디 (CSS Grid + 스크롤) === */
+.body {
+flex: 1; /* 남은 공간 모두 사용 */
+overflow-y: auto; /* 세로 스크롤만 허용 */
+overflow-x: hidden;
+min-height: 0; /* flex 축소 허용 */
+}
+
+.row {
+/* CSS Grid로 헤더와 동일한 컬럼 구조 */
+display: grid;
+/* gridTemplateColumns는 JavaScript에서 헤더와 동일하게 설정됨 */
+
+border-bottom: 1px solid var(–row-border, #e9ecef);
+transition: background-color 0.15s ease;
+
+&:hover {
+background-color: var(–row-hover, #f8f9fa);
+}
+
+/* 체크된 행 (체크박스로 선택) */
+&.checked {
+background-color: var(–row-checked, #f3e5f5);
+
+```
+&:hover {
+  background-color: var(--row-checked-hover, #e1bee7);
+}
+```
+
+}
+
+/* 선택된 행 (행 클릭으로 선택) */
+&.selected {
+background-color: var(–row-selected, #e3f2fd);
+
+```
+&:hover {
+  background-color: var(--row-selected-hover, #bbdefb);
+}
+```
+
+}
+
+/* 선택되고 체크된 행 */
+&.selected.checked {
+background-color: var(–row-selected-checked, #e8f5e8);
+
+```
+&:hover {
+  background-color: var(--row-selected-checked-hover, #c8e6c9);
+}
+```
+
+}
+
+/* 체크할 수 없는 행 */
+&.disabled {
+opacity: 0.6;
+
+```
+&:hover {
+  background-color: inherit;
+}
+```
+
+}
+
+/* 클릭 가능한 행 */
+&.clickable {
+cursor: pointer;
+
+```
+&:active {
+  background-color: var(--row-active, #e9ecef);
+}
+```
+
+}
+
+/* 마지막 행 테두리 제거 */
+&:last-child {
+border-bottom: none;
+}
+}
+
+.cell {
+padding: 12px 16px;
+font-size: 14px;
+color: var(–cell-text, #495057);
+border-right: 1px solid var(–cell-border, #e9ecef);
+line-height: 1.4;
+
+/* Flexbox로 내부 콘텐츠 정렬 */
+display: flex;
+align-items: center;
+justify-content: flex-start;
+
+/* 텍스트 오버플로우 처리 */
+overflow: hidden;
+text-overflow: ellipsis;
+white-space: nowrap;
+
+/* 체크박스 스타일 */
+input[type=“checkbox”],
+input[type=“radio”] {
+cursor: pointer;
+transform: scale(1.1);
+flex-shrink: 0;
+
+```
+&:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+```
+
+}
+
+/* 정렬 */
+&.alignCenter {
+justify-content: center;
+}
+
+&.alignRight {
+justify-content: flex-end;
+}
+
+/* 마지막 셀 테두리 제거 */
+&:last-child {
+border-right: none;
+}
+}
+
+/* === 빈 상태 === */
+.emptyState {
+grid-column: 1 / -1; /* 모든 컬럼에 걸쳐 표시 */
+padding: 48px 24px;
+text-align: center;
+color: var(–empty-text, #6c757d);
+font-size: 16px;
+font-style: italic;
+}
+
+/* === 로딩 상태 === */
+.loadingOverlay {
+position: absolute;
+top: 0;
+left: 0;
+right: 0;
+bottom: 0;
+display: flex;
+align-items: center;
+justify-content: center;
+background-color: rgba(255, 255, 255, 0.8);
+backdrop-filter: blur(1px);
+z-index: 20;
+border-radius: inherit;
+}
+
+.spinner {
+width: 32px;
+height: 32px;
+border: 3px solid var(–spinner-track, #f3f3f3);
+border-top: 3px solid var(–spinner-color, #007bff);
+border-radius: 50%;
+animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+0% { transform: rotate(0deg); }
+100% { transform: rotate(360deg); }
+}
+
+/* === 페이지네이션 === */
+.pagination {
+display: flex;
+justify-content: space-between;
+align-items: center;
+padding: 16px 20px;
+border-top: 1px solid var(–border-color, #e0e0e0);
+background-color: var(–pagination-bg, #f8f9fa);
+font-size: 14px;
+flex-shrink: 0; /* 페이지네이션은 축소되지 않음 */
+min-height: 60px;
+}
+
+.paginationInfo {
+display: flex;
+align-items: center;
+gap: 16px;
+color: var(–pagination-text, #495057);
+}
+
+.pageSizeSelect {
+padding: 4px 8px;
+border: 1px solid var(–border-color, #e0e0e0);
+border-radius: 4px;
+background-color: var(–input-bg, #ffffff);
+color: var(–pagination-text, #495057);
+font-size: 14px;
+cursor: pointer;
+
+&:focus {
+outline: 2px solid var(–focus-color, #007bff);
+outline-offset: 2px;
+}
+}
+
+.paginationControls {
+display: flex;
+align-items: center;
+gap: 4px;
+}
+
+.pageButton {
+display: flex;
+align-items: center;
+justify-content: center;
+min-width: 32px;
+height: 32px;
+padding: 0 8px;
+border: 1px solid var(–border-color, #e0e0e0);
+border-radius: 4px;
+background-color: var(–button-bg, #ffffff);
+color: var(–button-text, #495057);
+font-size: 14px;
+cursor: pointer;
+transition: all 0.2s ease;
+
+&:hover:not(:disabled) {
+background-color: var(–button-hover, #e9ecef);
+border-color: var(–button-hover-border, #adb5bd);
+}
+
+&:active:not(:disabled) {
+background-color: var(–button-active, #dee2e6);
+}
+
+&:disabled {
+opacity: 0.5;
+cursor: not-allowed;
+background-color: var(–button-disabled, #f8f9fa);
+}
+
+&.active {
+background-color: var(–button-primary, #007bff);
+border-color: var(–button-primary, #007bff);
+color: var(–button-primary-text, #ffffff);
+
+```
+&:hover {
+  background-color: var(--button-primary-hover, #0056b3);
+  border-color: var(--button-primary-hover, #0056b3);
+}
+```
+
+}
+
+&:focus {
+outline: 2px solid var(–focus-color, #007bff);
+outline-offset: 2px;
+}
+}
+
+/* === 반응형 === */
+@media (max-width: 768px) {
+.headerCell,
+.cell {
+padding: 8px 12px;
+font-size: 13px;
+}
+
+.pagination {
+flex-direction: column;
+gap: 12px;
+padding: 12px 16px;
+}
+
+.paginationInfo {
+font-size: 13px;
+}
+
+.pageButton {
+min-width: 28px;
+height: 28px;
+font-size: 13px;
+}
+}
+
+@media (max-width: 480px) {
+.headerCell,
+.cell {
+padding: 6px 8px;
+font-size: 12px;
+}
+
+.paginationControls {
+gap: 2px;
+}
+
+.pageButton {
+min-width: 24px;
+height: 24px;
+padding: 0 4px;
+font-size: 12px;
+}
+
+.sortIcon {
+font-size: 10px;
+}
+}
+
+/* === 다크 테마 === */
+@media (prefers-color-scheme: dark) {
+.grid {
+–grid-bg: #1a1a1a;
+–header-bg: #2d2d2d;
+–header-border: #404040;
+–header-text: #e0e0e0;
+–header-hover: #404040;
+–header-active: #4a4a4a;
+–cell-text: #e0e0e0;
+–cell-border: #404040;
+–row-border: #404040;
+–row-hover: #2d2d2d;
+–row-active: #404040;
+–row-selected: #1a365d;
+–row-selected-hover: #2c5282;
+–row-checked: #4a148c;
+–row-checked-hover: #6a1b9a;
+–row-selected-checked: #1b5e20;
+–row-selected-checked-hover: #2e7d32;
+–border-color: #404040;
+–empty-text: #a0a0a0;
+–spinner-track: #404040;
+–spinner-color: #60a5fa;
+–sort-icon: #a0a0a0;
+–sort-active: #60a5fa;
+–pagination-bg: #2d2d2d;
+–pagination-text: #e0e0e0;
+–input-bg: #1a1a1a;
+–button-bg: #404040;
+–button-text: #e0e0e0;
+–button-hover: #4a4a4a;
+–button-hover-border: #6a6a6a;
+–button-active: #555555;
+–button-disabled: #2d2d2d;
+–button-primary: #60a5fa;
+–button-primary-text: #1a1a1a;
+–button-primary-hover: #3b82f6;
+}
+}
+
+/* === 접근성 === */
+@media (prefers-reduced-motion: reduce) {
+.row,
+.headerCell.sortable,
+.sortIcon,
+.spinner,
+.pageButton {
+transition: none;
+animation: none;
+}
+}
+
+/* 포커스 상태 */
+.grid:focus-within {
+outline: 2px solid var(–focus-color, #007bff);
+outline-offset: 2px;
+}
+
+/* 고대비 모드 */
+@media (prefers-contrast: high) {
+.grid {
+–border-color: #000000;
+–cell-border: #000000;
+–row-border: #000000;
+–header-border: #000000;
+}
+}
